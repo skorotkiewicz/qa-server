@@ -5,14 +5,13 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use rand::distributions::Alphanumeric;
 use rand::Rng;
+use rand::distributions::Alphanumeric;
 use serde::{Deserialize, Serialize};
-use serde_yaml;
 use sqlx::FromRow;
 
 // -- Config
@@ -117,7 +116,7 @@ fn generate_api_key() -> String {
 
 async fn get_user_by_api_key(pool: &DbPool, api_key: &str) -> anyhow::Result<Option<User>> {
     let user = sqlx::query_as::<_, User>(
-        "SELECT id, username, api_key, created_at FROM users WHERE api_key = $1"
+        "SELECT id, username, api_key, created_at FROM users WHERE api_key = $1",
     )
     .bind(api_key)
     .fetch_optional(pool)
@@ -129,27 +128,21 @@ fn get_api_key_from_headers(headers: &HeaderMap) -> Option<&str> {
     headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .or_else(|| {
-            headers
-                .get("x-api-key")
-                .and_then(|v| v.to_str().ok())
-        })
+        .or_else(|| headers.get("x-api-key").and_then(|v| v.to_str().ok()))
 }
 
 macro_rules! require_auth {
     ($pool:expr, $headers:expr) => {
         match get_api_key_from_headers(&$headers) {
-            Some(api_key) => {
-                match get_user_by_api_key($pool, api_key).await {
-                    Ok(Some(user)) => user,
-                    Ok(None) => {
-                        return (StatusCode::UNAUTHORIZED, "invalid api key").into_response();
-                    }
-                    Err(e) => {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-                    }
+            Some(api_key) => match get_user_by_api_key($pool, api_key).await {
+                Ok(Some(user)) => user,
+                Ok(None) => {
+                    return (StatusCode::UNAUTHORIZED, "invalid api key").into_response();
                 }
-            }
+                Err(e) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
+            },
             None => {
                 return (StatusCode::UNAUTHORIZED, "missing api key").into_response();
             }
@@ -165,13 +158,13 @@ async fn create_account(
     Json(req): Json<CreateUserRequest>,
 ) -> Response {
     let api_key = generate_api_key();
-    
+
     let result = sqlx::query("INSERT INTO users (username, api_key) VALUES ($1, $2)")
         .bind(&req.username)
         .bind(&api_key)
         .execute(&pool)
         .await;
-    
+
     match result {
         Ok(res) => {
             let user_id = res.last_insert_rowid();
@@ -206,25 +199,31 @@ async fn change_api_key(
     let current_key = match get_api_key_from_headers(&headers) {
         Some(key) => key,
         None => {
-            return (StatusCode::UNAUTHORIZED, "missing api key in authorization header").into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                "missing api key in authorization header",
+            )
+                .into_response();
         }
     };
-    
+
     if current_key != req.current_api_key {
         return (StatusCode::UNAUTHORIZED, "invalid current api key").into_response();
     }
-    
+
     let new_api_key = generate_api_key();
-    
+
     let result = sqlx::query("UPDATE users SET api_key = $1 WHERE api_key = $2")
         .bind(&new_api_key)
         .bind(&req.current_api_key)
         .execute(&pool)
         .await;
-    
+
     match result {
         Ok(_) => {
-            let resp = ApiKeyResponse { api_key: new_api_key.clone() };
+            let resp = ApiKeyResponse {
+                api_key: new_api_key.clone(),
+            };
             (
                 StatusCode::OK,
                 [("x-api-key", new_api_key.as_str())],
@@ -243,16 +242,14 @@ async fn create_question(
     Json(req): Json<CreateQuestionRequest>,
 ) -> Response {
     let user = require_auth!(&pool, headers);
-    
-    let result = sqlx::query(
-        "INSERT INTO questions (user_id, title, content) VALUES ($1, $2, $3)"
-    )
-    .bind(user.id)
-    .bind(&req.title)
-    .bind(&req.content)
-    .execute(&pool)
-    .await;
-    
+
+    let result = sqlx::query("INSERT INTO questions (user_id, title, content) VALUES ($1, $2, $3)")
+        .bind(user.id)
+        .bind(&req.title)
+        .bind(&req.content)
+        .execute(&pool)
+        .await;
+
     match result {
         Ok(res) => {
             let question_id = res.last_insert_rowid();
@@ -265,7 +262,7 @@ async fn create_question(
 /// GET /questions/unsolved - List unsolved questions
 async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Response {
     let user = require_auth!(&pool, headers);
-    
+
     let questions = sqlx::query_as::<_, Question>(
         r#"
         SELECT 
@@ -276,12 +273,12 @@ async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Respon
         JOIN users u ON q.user_id = u.id
         WHERE q.solved = FALSE
         ORDER BY q.created_at DESC
-        "#
+        "#,
     )
     .bind(user.id)
     .fetch_all(&pool)
     .await;
-    
+
     match questions {
         Ok(rows) => Json(rows).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -296,29 +293,27 @@ async fn create_answer(
     Json(req): Json<CreateAnswerRequest>,
 ) -> Response {
     let user = require_auth!(&pool, headers);
-    
+
     // Check if question exists
-    let question_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM questions WHERE id = $1)"
-    )
-    .bind(question_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(false);
-    
+    let question_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM questions WHERE id = $1)")
+            .bind(question_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(false);
+
     if !question_exists {
         return (StatusCode::NOT_FOUND, "question not found").into_response();
     }
-    
-    let result = sqlx::query(
-        "INSERT INTO answers (question_id, user_id, content) VALUES ($1, $2, $3)"
-    )
-    .bind(question_id)
-    .bind(user.id)
-    .bind(&req.content)
-    .execute(&pool)
-    .await;
-    
+
+    let result =
+        sqlx::query("INSERT INTO answers (question_id, user_id, content) VALUES ($1, $2, $3)")
+            .bind(question_id)
+            .bind(user.id)
+            .bind(&req.content)
+            .execute(&pool)
+            .await;
+
     match result {
         Ok(res) => {
             let answer_id = res.last_insert_rowid();
@@ -335,35 +330,34 @@ async fn mark_solved(
     Path(question_id): Path<i64>,
 ) -> Response {
     let user = require_auth!(&pool, headers);
-    
+
     // Get question and verify ownership
-    let question: Option<(i64,)> = sqlx::query_as(
-        "SELECT user_id FROM questions WHERE id = $1"
-    )
-    .bind(question_id)
-    .fetch_optional(&pool)
-    .await
-    .ok()
-    .flatten();
-    
+    let question: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM questions WHERE id = $1")
+        .bind(question_id)
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+
     match question {
         Some((owner_id,)) => {
             if owner_id != user.id {
-                return (StatusCode::FORBIDDEN, "only the asker can mark as solved").into_response();
+                return (StatusCode::FORBIDDEN, "only the asker can mark as solved")
+                    .into_response();
             }
         }
         None => {
             return (StatusCode::NOT_FOUND, "question not found").into_response();
         }
     }
-    
+
     let result = sqlx::query(
-        "UPDATE questions SET solved = TRUE, solved_at = CURRENT_TIMESTAMP WHERE id = $1"
+        "UPDATE questions SET solved = TRUE, solved_at = CURRENT_TIMESTAMP WHERE id = $1",
     )
     .bind(question_id)
     .execute(&pool)
     .await;
-    
+
     match result {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -377,15 +371,15 @@ async fn star_question(
     Path(question_id): Path<i64>,
 ) -> Response {
     let user = require_auth!(&pool, headers);
-    
+
     let result = sqlx::query(
-        "INSERT INTO stars (user_id, question_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+        "INSERT INTO stars (user_id, question_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
     )
     .bind(user.id)
     .bind(question_id)
     .execute(&pool)
     .await;
-    
+
     match result {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
@@ -405,15 +399,13 @@ async fn unstar_question(
     Path(question_id): Path<i64>,
 ) -> Response {
     let user = require_auth!(&pool, headers);
-    
-    let result = sqlx::query(
-        "DELETE FROM stars WHERE user_id = $1 AND question_id = $2"
-    )
-    .bind(user.id)
-    .bind(question_id)
-    .execute(&pool)
-    .await;
-    
+
+    let result = sqlx::query("DELETE FROM stars WHERE user_id = $1 AND question_id = $2")
+        .bind(user.id)
+        .bind(question_id)
+        .execute(&pool)
+        .await;
+
     match result {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -427,7 +419,7 @@ async fn get_question(
     Path(question_id): Path<i64>,
 ) -> Response {
     let _user = require_auth!(&pool, headers);
-    
+
     let question = sqlx::query_as::<_, Question>(
         r#"
         SELECT 
@@ -436,12 +428,12 @@ async fn get_question(
         FROM questions q
         JOIN users u ON q.user_id = u.id
         WHERE q.id = $1
-        "#
+        "#,
     )
     .bind(question_id)
     .fetch_optional(&pool)
     .await;
-    
+
     match question {
         Ok(Some(q)) => {
             let answers = sqlx::query_as::<_, Answer>(
@@ -452,12 +444,12 @@ async fn get_question(
                 JOIN users u ON a.user_id = u.id
                 WHERE a.question_id = $1
                 ORDER BY a.created_at ASC
-                "#
+                "#,
             )
             .bind(question_id)
             .fetch_all(&pool)
             .await;
-            
+
             match answers {
                 Ok(ans) => {
                     #[derive(Serialize)]
@@ -466,7 +458,7 @@ async fn get_question(
                         question: Question,
                         answers: Vec<Answer>,
                     }
-                    
+
                     let resp = QuestionWithAnswers {
                         question: q,
                         answers: ans,
@@ -477,6 +469,87 @@ async fn get_question(
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "question not found").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// DELETE /questions/:id - Delete own question (with all answers)
+async fn delete_question(
+    State(pool): State<DbPool>,
+    headers: HeaderMap,
+    Path(question_id): Path<i64>,
+) -> Response {
+    let user = require_auth!(&pool, headers);
+
+    // Verify ownership
+    let owner: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM questions WHERE id = $1")
+        .bind(question_id)
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+
+    match owner {
+        Some((owner_id,)) => {
+            if owner_id != user.id {
+                return (StatusCode::FORBIDDEN, "can only delete your own questions")
+                    .into_response();
+            }
+        }
+        None => {
+            return (StatusCode::NOT_FOUND, "question not found").into_response();
+        }
+    }
+
+    // Delete question (answers cascade via FK constraint)
+    let result = sqlx::query("DELETE FROM questions WHERE id = $1")
+        .bind(question_id)
+        .execute(&pool)
+        .await;
+
+    match result {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// DELETE /questions/:id/answers/:answer_id - Delete own answer
+async fn delete_answer(
+    State(pool): State<DbPool>,
+    headers: HeaderMap,
+    Path((question_id, answer_id)): Path<(i64, i64)>,
+) -> Response {
+    let user = require_auth!(&pool, headers);
+
+    // Verify answer exists and belongs to the question
+    let owner: Option<(i64,)> =
+        sqlx::query_as("SELECT user_id FROM answers WHERE id = $1 AND question_id = $2")
+            .bind(answer_id)
+            .bind(question_id)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten();
+
+    match owner {
+        Some((owner_id,)) => {
+            if owner_id != user.id {
+                return (StatusCode::FORBIDDEN, "can only delete your own answers").into_response();
+            }
+        }
+        None => {
+            return (StatusCode::NOT_FOUND, "answer not found").into_response();
+        }
+    }
+
+    // Delete answer
+    let result = sqlx::query("DELETE FROM answers WHERE id = $1")
+        .bind(answer_id)
+        .execute(&pool)
+        .await;
+
+    match result {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -504,18 +577,19 @@ async fn main() -> anyhow::Result<()> {
     let bind: SocketAddr = cfg.bind.as_deref().unwrap_or("0.0.0.0:7878").parse()?;
 
     // Ensure database file exists for SQLite
-    let db_path = cfg.database_url
+    let db_path = cfg
+        .database_url
         .strip_prefix("sqlite://")
         .or_else(|| cfg.database_url.strip_prefix("sqlite:"))
         .unwrap_or(&cfg.database_url);
-    
+
     if !std::path::Path::new(db_path).exists() {
         std::fs::File::create(db_path)?;
     }
-    
+
     let pool = sqlx::SqlitePool::connect(&cfg.database_url).await?;
     sqlx::migrate!("./migrations/sqlite").run(&pool).await?;
-    
+
     println!("✓ database connected ({db_path})");
 
     let app = Router::new()
@@ -524,10 +598,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/change-api-key", post(change_api_key))
         .route("/questions", post(create_question))
         .route("/questions/unsolved", get(list_unsolved))
-        .route("/questions/{id}", get(get_question))
+        .route("/questions/{id}", get(get_question).delete(delete_question))
         .route("/questions/{id}/answers", post(create_answer))
+        .route("/questions/{id}/answers/{answer_id}", delete(delete_answer))
         .route("/questions/{id}/solved", post(mark_solved))
-        .route("/questions/{id}/star", post(star_question).delete(unstar_question))
+        .route(
+            "/questions/{id}/star",
+            post(star_question).delete(unstar_question),
+        )
         .with_state(pool);
 
     println!("✓ qa-server listening on {bind}");

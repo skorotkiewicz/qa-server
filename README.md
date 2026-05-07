@@ -38,6 +38,12 @@ cat answer.md | ./qa answer 12
 ./qa star 12
 ./qa unstar 12
 
+# Remove your own question (with all its answers)
+./qa rm-question 12
+
+# Remove your own answer
+./qa rm-answer 12 5  # question_id=12, answer_id=5
+
 # Change your API key
 ./qa change-api-key
 ```
@@ -55,6 +61,8 @@ cat answer.md | ./qa answer 12
 | `qa solved <id>` | Mark question as solved (asker only) |
 | `qa star <id>` | Star a question |
 | `qa unstar <id>` | Unstar a question |
+| `qa rm-question <id>` | Delete your own question (with answers) |
+| `qa rm-answer <qid> <aid>` | Delete your own answer |
 
 ## API Endpoints
 
@@ -64,7 +72,10 @@ cat answer.md | ./qa answer 12
 | POST | `/change-api-key` | Change API key |
 | POST | `/questions` | Ask a question |
 | GET | `/questions/unsolved` | List unsolved questions |
+| GET | `/questions/{id}` | Get question with answers |
+| DELETE | `/questions/{id}` | Delete own question |
 | POST | `/questions/{id}/answers` | Answer a question |
+| DELETE | `/questions/{id}/answers/{answer_id}` | Delete own answer |
 | POST | `/questions/{id}/solved` | Mark as solved |
 | POST | `/questions/{id}/star` | Star a question |
 | DELETE | `/questions/{id}/star` | Unstar a question |

@@ -1,9 +1,12 @@
-use std::{fs, io::{self, Read}, path::PathBuf};
+use std::{
+    fs,
+    io::{self, Read},
+    path::PathBuf,
+};
 
 use anyhow::Context;
 use clap::{CommandFactory, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
-use serde_yaml;
 
 // -- Config
 
@@ -22,8 +25,12 @@ fn config_path() -> PathBuf {
 
 fn load_config() -> anyhow::Result<ClientConfig> {
     let path = config_path();
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("Config not found at {}. Run `qa create-account` first.", path.display()))?;
+    let text = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "Config not found at {}. Run `qa create-account` first.",
+            path.display()
+        )
+    })?;
     Ok(serde_yaml::from_str(&text)?)
 }
 
@@ -122,46 +129,60 @@ struct Cli {
 enum Cmd {
     /// Create a new account and save API key
     CreateAccount,
-    
+
     /// Change your API key (requires current API key)
     ChangeApiKey,
-    
+
     /// Ask a question (reads from stdin, expects title on first line, then content)
     Ask,
-    
+
     /// List unsolved questions
     Unsolved,
-    
+
     /// Get a question with all its answers
     Get {
         /// Question ID
         id: i64,
     },
-    
+
     /// Answer a question (reads from stdin)
     Answer {
         /// Question ID
         id: i64,
     },
-    
+
     /// Mark a question as solved (only the asker can do this)
     Solved {
         /// Question ID
         id: i64,
     },
-    
+
     /// Star a question
     Star {
         /// Question ID
         id: i64,
     },
-    
+
     /// Unstar a question
     Unstar {
         /// Question ID
         id: i64,
     },
-    
+
+    /// Remove your own question (with all its answers)
+    RmQuestion {
+        /// Question ID
+        id: i64,
+    },
+
+    /// Remove your own answer
+    RmAnswer {
+        /// Question ID
+        question_id: i64,
+        /// Answer ID
+        answer_id: i64,
+    },
+
     /// Generate shell completion
     Complete { shell: clap_complete::Shell },
 }
@@ -175,22 +196,23 @@ fn main() -> anyhow::Result<()> {
         Cmd::CreateAccount => {
             let endpoint = prompt_endpoint()?;
             let username = prompt("Username: ")?;
-            
+
             let client = client_no_auth();
             let url = format!("{}/register", endpoint);
-            
+
             let resp = client
                 .post(&url)
                 .json(&serde_json::json!({ "username": username }))
                 .send()?;
-            
+
             if resp.status().is_success() {
                 let api_key = get_api_key_from_response(&resp)
                     .context("Server did not return x-api-key header")?;
-                
+
                 // Try to parse the JSON body
                 let body_text = resp.text()?;
-                let body_result: Result<CreateAccountResponse, _> = serde_json::from_str(&body_text);
+                let body_result: Result<CreateAccountResponse, _> =
+                    serde_json::from_str(&body_text);
                 let body = match body_result {
                     Ok(b) => b,
                     Err(_) => {
@@ -202,7 +224,7 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                 };
-                
+
                 // Save config
                 let cfg = ClientConfig {
                     endpoint,
@@ -210,7 +232,7 @@ fn main() -> anyhow::Result<()> {
                     username: Some(username.clone()),
                 };
                 save_config(&cfg)?;
-                
+
                 println!("✓ Account created: {}", body.username);
                 println!("✓ API key saved to {}", config_path().display());
                 println!("  API Key: {}", api_key);
@@ -222,26 +244,28 @@ fn main() -> anyhow::Result<()> {
 
         Cmd::ChangeApiKey => {
             let mut cfg = load_config()?;
-            let current_api_key = cfg.api_key.as_ref()
+            let current_api_key = cfg
+                .api_key
+                .as_ref()
                 .context("No API key found. Run `qa create-account` first.")?;
             let endpoint = &cfg.endpoint;
-            
+
             let client = client_with_api_key(current_api_key);
             let url = format!("{}/change-api-key", endpoint);
-            
+
             let resp = client
                 .post(&url)
                 .json(&serde_json::json!({ "current_api_key": current_api_key }))
                 .send()?;
-            
+
             if resp.status().is_success() {
                 let new_api_key = get_api_key_from_response(&resp)
                     .context("Server did not return x-api-key header")?;
-                
+
                 // Update and save config
                 cfg.api_key = Some(new_api_key.clone());
                 save_config(&cfg)?;
-                
+
                 println!("✓ API key changed successfully");
                 println!("  New API Key: {}", new_api_key);
             } else {
@@ -252,40 +276,44 @@ fn main() -> anyhow::Result<()> {
 
         Cmd::Ask => {
             let cfg = load_config()?;
-            let api_key = cfg.api_key.as_ref()
+            let api_key = cfg
+                .api_key
+                .as_ref()
                 .context("No API key found. Run `qa create-account` first.")?;
             let endpoint = &cfg.endpoint;
-            
+
             // Read from stdin
             let mut input = String::new();
             io::stdin().read_to_string(&mut input)?;
-            
+
             // Parse title (first line) and content (rest)
             let lines: Vec<&str> = input.lines().collect();
             if lines.is_empty() {
                 anyhow::bail!("No input provided. Expected title on first line, then content.");
             }
-            
+
             let title = lines[0].trim().to_string();
             let content = lines[1..].join("\n").trim().to_string();
-            
+
             if title.is_empty() {
                 anyhow::bail!("Title cannot be empty");
             }
-            
+
             let client = client_with_api_key(api_key);
             let url = format!("{}/questions", endpoint);
-            
+
             let resp = client
                 .post(&url)
-                .json(&serde_json::json!({ 
+                .json(&serde_json::json!({
                     "title": title,
-                    "content": content 
+                    "content": content
                 }))
                 .send()?;
-            
+
             if resp.status().is_success() {
-                let question_id: i64 = resp.text()?.parse()
+                let question_id: i64 = resp
+                    .text()?
+                    .parse()
                     .context("Failed to parse question ID")?;
                 println!("✓ Question created: #{}", question_id);
             } else {
@@ -296,18 +324,20 @@ fn main() -> anyhow::Result<()> {
 
         Cmd::Unsolved => {
             let cfg = load_config()?;
-            let api_key = cfg.api_key.as_ref()
+            let api_key = cfg
+                .api_key
+                .as_ref()
                 .context("No API key found. Run `qa create-account` first.")?;
             let endpoint = &cfg.endpoint;
-            
+
             let client = client_with_api_key(api_key);
             let url = format!("{}/questions/unsolved", endpoint);
-            
+
             let resp = client.get(&url).send()?;
-            
+
             if resp.status().is_success() {
                 let questions: Vec<Question> = resp.json()?;
-                
+
                 if questions.is_empty() {
                     println!("No unsolved questions.");
                 } else {
@@ -332,26 +362,31 @@ fn main() -> anyhow::Result<()> {
 
         Cmd::Get { id } => {
             let cfg = load_config()?;
-            let api_key = cfg.api_key.as_ref()
+            let api_key = cfg
+                .api_key
+                .as_ref()
                 .context("No API key found. Run `qa create-account` first.")?;
             let endpoint = &cfg.endpoint;
-            
+
             let client = client_with_api_key(api_key);
             let url = format!("{}/questions/{}", endpoint, id);
-            
+
             let resp = client.get(&url).send()?;
-            
+
             if resp.status().is_success() {
                 let qa: QuestionWithAnswers = resp.json()?;
                 let q = qa.question;
-                
+
                 let status = if q.solved { "[SOLVED]" } else { "[OPEN]" };
                 let star_marker = if q.starred { " ★" } else { "" };
-                
-                println!("{} Question #{}: {} by {}{}", status, q.id, q.title, q.author, star_marker);
+
+                println!(
+                    "{} Question #{}: {} by {}{}",
+                    status, q.id, q.title, q.author, star_marker
+                );
                 println!("\n{}", q.content);
                 println!("\n--- {} Answers ---", qa.answers.len());
-                
+
                 for ans in qa.answers {
                     println!("\nAnswer #{} by {}", ans.id, ans.author);
                     println!("{}", ans.content);
@@ -366,31 +401,32 @@ fn main() -> anyhow::Result<()> {
 
         Cmd::Answer { id } => {
             let cfg = load_config()?;
-            let api_key = cfg.api_key.as_ref()
+            let api_key = cfg
+                .api_key
+                .as_ref()
                 .context("No API key found. Run `qa create-account` first.")?;
             let endpoint = &cfg.endpoint;
-            
+
             // Read answer content from stdin
             let mut content = String::new();
             io::stdin().read_to_string(&mut content)?;
             let content = content.trim();
-            
+
             if content.is_empty() {
                 anyhow::bail!("Answer content cannot be empty");
             }
-            
+
             let client = client_with_api_key(api_key);
             let url = format!("{}/questions/{}/answers", endpoint, id);
-            
+
             let resp = client
                 .post(&url)
                 .json(&serde_json::json!({ "content": content }))
                 .send()?;
-            
+
             if resp.status().is_success() {
-                let answer_id: i64 = resp.text()?.parse()
-                    .context("Failed to parse answer ID")?;
-                println!("✓ Answer created: #{} for question #{}" , answer_id, id);
+                let answer_id: i64 = resp.text()?.parse().context("Failed to parse answer ID")?;
+                println!("✓ Answer created: #{} for question #{}", answer_id, id);
             } else {
                 let err_text = resp.text()?;
                 anyhow::bail!("Server error: {}", err_text);
@@ -399,15 +435,17 @@ fn main() -> anyhow::Result<()> {
 
         Cmd::Solved { id } => {
             let cfg = load_config()?;
-            let api_key = cfg.api_key.as_ref()
+            let api_key = cfg
+                .api_key
+                .as_ref()
                 .context("No API key found. Run `qa create-account` first.")?;
             let endpoint = &cfg.endpoint;
-            
+
             let client = client_with_api_key(api_key);
             let url = format!("{}/questions/{}/solved", endpoint, id);
-            
+
             let resp = client.post(&url).send()?;
-            
+
             if resp.status().is_success() {
                 println!("✓ Question #{} marked as solved", id);
             } else if resp.status() == reqwest::StatusCode::FORBIDDEN {
@@ -420,17 +458,19 @@ fn main() -> anyhow::Result<()> {
 
         Cmd::Star { id } => {
             let cfg = load_config()?;
-            let api_key = cfg.api_key.as_ref()
+            let api_key = cfg
+                .api_key
+                .as_ref()
                 .context("No API key found. Run `qa create-account` first.")?;
             let endpoint = &cfg.endpoint;
-            
+
             let client = client_with_api_key(api_key);
             let url = format!("{}/questions/{}/star", endpoint, id);
-            
+
             let resp = client.post(&url).send()?;
-            
+
             if resp.status().is_success() {
-                println!("✓ Starred question #{}" , id);
+                println!("✓ Starred question #{}", id);
             } else {
                 let err_text = resp.text()?;
                 anyhow::bail!("Server error: {}", err_text);
@@ -439,17 +479,82 @@ fn main() -> anyhow::Result<()> {
 
         Cmd::Unstar { id } => {
             let cfg = load_config()?;
-            let api_key = cfg.api_key.as_ref()
+            let api_key = cfg
+                .api_key
+                .as_ref()
                 .context("No API key found. Run `qa create-account` first.")?;
             let endpoint = &cfg.endpoint;
-            
+
             let client = client_with_api_key(api_key);
             let url = format!("{}/questions/{}/star", endpoint, id);
-            
+
             let resp = client.delete(&url).send()?;
-            
+
             if resp.status().is_success() {
-                println!("✓ Unstarred question #{}" , id);
+                println!("✓ Unstarred question #{}", id);
+            } else {
+                let err_text = resp.text()?;
+                anyhow::bail!("Server error: {}", err_text);
+            }
+        }
+
+        Cmd::RmQuestion { id } => {
+            let cfg = load_config()?;
+            let api_key = cfg
+                .api_key
+                .as_ref()
+                .context("No API key found. Run `qa create-account` first.")?;
+            let endpoint = &cfg.endpoint;
+
+            let client = client_with_api_key(api_key);
+            let url = format!("{}/questions/{}", endpoint, id);
+
+            let resp = client.delete(&url).send()?;
+
+            if resp.status().is_success() {
+                println!("✓ Deleted question #{} with all its answers", id);
+            } else if resp.status() == reqwest::StatusCode::FORBIDDEN {
+                anyhow::bail!("You can only delete your own questions");
+            } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                anyhow::bail!("Question #{} not found", id);
+            } else {
+                let err_text = resp.text()?;
+                anyhow::bail!("Server error: {}", err_text);
+            }
+        }
+
+        Cmd::RmAnswer {
+            question_id,
+            answer_id,
+        } => {
+            let cfg = load_config()?;
+            let api_key = cfg
+                .api_key
+                .as_ref()
+                .context("No API key found. Run `qa create-account` first.")?;
+            let endpoint = &cfg.endpoint;
+
+            let client = client_with_api_key(api_key);
+            let url = format!(
+                "{}/questions/{}/answers/{}",
+                endpoint, question_id, answer_id
+            );
+
+            let resp = client.delete(&url).send()?;
+
+            if resp.status().is_success() {
+                println!(
+                    "✓ Deleted answer #{} from question #{}",
+                    answer_id, question_id
+                );
+            } else if resp.status() == reqwest::StatusCode::FORBIDDEN {
+                anyhow::bail!("You can only delete your own answers");
+            } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                anyhow::bail!(
+                    "Answer #{} not found for question #{}",
+                    answer_id,
+                    question_id
+                );
             } else {
                 let err_text = resp.text()?;
                 anyhow::bail!("Server error: {}", err_text);
@@ -480,7 +585,11 @@ fn prompt_endpoint() -> anyhow::Result<String> {
     } else {
         "http://localhost:7878".to_string()
     };
-    
+
     let endpoint = prompt(&format!("Server endpoint [{}]: ", default))?;
-    Ok(if endpoint.is_empty() { default } else { endpoint })
+    Ok(if endpoint.is_empty() {
+        default
+    } else {
+        endpoint
+    })
 }
