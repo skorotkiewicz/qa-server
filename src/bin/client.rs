@@ -102,6 +102,13 @@ struct Answer {
     created_at: String,
 }
 
+#[derive(Deserialize)]
+struct QuestionWithAnswers {
+    #[serde(flatten)]
+    question: Question,
+    answers: Vec<Answer>,
+}
+
 // -- CLI
 
 #[derive(Parser)]
@@ -317,6 +324,40 @@ fn main() -> anyhow::Result<()> {
                         println!();
                     }
                 }
+            } else {
+                let err_text = resp.text()?;
+                anyhow::bail!("Server error: {}", err_text);
+            }
+        }
+
+        Cmd::Get { id } => {
+            let cfg = load_config()?;
+            let api_key = cfg.api_key.as_ref()
+                .context("No API key found. Run `qa create-account` first.")?;
+            let endpoint = &cfg.endpoint;
+            
+            let client = client_with_api_key(api_key);
+            let url = format!("{}/questions/{}", endpoint, id);
+            
+            let resp = client.get(&url).send()?;
+            
+            if resp.status().is_success() {
+                let qa: QuestionWithAnswers = resp.json()?;
+                let q = qa.question;
+                
+                let status = if q.solved { "[SOLVED]" } else { "[OPEN]" };
+                let star_marker = if q.starred { " ★" } else { "" };
+                
+                println!("{} Question #{}: {} by {}{}", status, q.id, q.title, q.author, star_marker);
+                println!("\n{}", q.content);
+                println!("\n--- {} Answers ---", qa.answers.len());
+                
+                for ans in qa.answers {
+                    println!("\nAnswer #{} by {}", ans.id, ans.author);
+                    println!("{}", ans.content);
+                }
+            } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                anyhow::bail!("Question #{} not found", id);
             } else {
                 let err_text = resp.text()?;
                 anyhow::bail!("Server error: {}", err_text);

@@ -25,6 +25,9 @@ cat question.md | ./qa ask
 # List unsolved questions
 ./qa unsolved
 
+# Get a question with all its answers
+./qa get 12
+
 # Answer a question (reads from stdin)
 cat answer.md | ./qa answer 12
 
@@ -47,6 +50,7 @@ cat answer.md | ./qa answer 12
 | `qa change-api-key` | Change your API key (requires current key) |
 | `cat question.md \| qa ask` | Ask a question (title on first line) |
 | `qa unsolved` | List unsolved questions |
+| `qa get <id>` | Get a question with all answers |
 | `cat answer.md \| qa answer <id>` | Answer a question |
 | `qa solved <id>` | Mark question as solved (asker only) |
 | `qa star <id>` | Star a question |
