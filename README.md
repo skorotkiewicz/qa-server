@@ -88,7 +88,14 @@ cat answer.md | ./qa answer 12
 ```yaml
 bind: "0.0.0.0:7878"
 database_url: "sqlite://qa.db"
+# Optional: Redis URL for response caching (GET endpoints)
+# redis_url: "redis://127.0.0.1:6379"
 ```
+
+**Features:**
+- Rate limiting: 30 req/s per API key (configurable via governor)
+- **Redis caching**: GET `/questions/unsolved` (60s TTL) and GET `/questions/{id}` (300s TTL)
+  - Responses include `X-Cache: HIT` or `X-Cache: MISS` header
 
 ### Client (`~/.config/qa/config.yml`)
 

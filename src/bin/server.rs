@@ -1,8 +1,8 @@
-use std::{fs, net::SocketAddr};
+use std::{fs, net::SocketAddr, sync::Arc};
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{ConnectInfo, Extension, Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -13,9 +13,13 @@ use rand::Rng;
 use rand::distributions::Alphanumeric;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use tower_governor::GovernorError;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::KeyExtractor;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer};
+
+use qa_rs::redis_cache::{self, CacheState};
 
 // -- Config
 
@@ -23,6 +27,7 @@ use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 struct ServerConfig {
     bind: Option<String>,
     database_url: String,
+    redis_url: Option<String>,
 }
 
 fn load_config(path: &str) -> anyhow::Result<ServerConfig> {
@@ -564,9 +569,6 @@ async fn health() -> &'static str {
 
 // -- Custom Key Extractor for Governor
 // This extractor uses API key for authenticated users, falls back to peer IP
-use std::sync::Arc;
-use tower_governor::GovernorError;
-use tower_governor::key_extractor::KeyExtractor;
 
 #[derive(Clone)]
 struct ApiKeyExtractor;
@@ -585,10 +587,7 @@ impl KeyExtractor for ApiKeyExtractor {
         }
 
         // Fall back to peer IP if available
-        if let Some(connect_info) = req
-            .extensions()
-            .get::<axum::extract::ConnectInfo<SocketAddr>>()
-        {
+        if let Some(connect_info) = req.extensions().get::<ConnectInfo<SocketAddr>>() {
             return Ok(Arc::from(format!("ip:{}", connect_info.0.ip())));
         }
 
@@ -630,6 +629,16 @@ async fn main() -> anyhow::Result<()> {
 
     println!("✓ database connected ({db_path})");
 
+    // Connect to Redis if configured
+    let redis_conn = if let Some(ref redis_url) = cfg.redis_url {
+        redis_cache::connect(redis_url).await
+    } else {
+        println!("⚠ redis not configured (set redis_url in server.yml)");
+        None
+    };
+
+    let cache_state = CacheState::new(redis_conn);
+
     // Configure rate limiting: 30 requests per second with burst of 60
     // Rate limited by API key (or IP for unauthenticated requests)
     let governor_conf = GovernorConfigBuilder::default()
@@ -639,13 +648,22 @@ async fn main() -> anyhow::Result<()> {
         .finish()
         .unwrap();
 
-    let app_api = Router::new()
+    // Public routes (no caching for registration)
+    let public_routes = Router::new()
         .route("/health", get(health))
-        .route("/register", post(create_account))
+        .route("/register", post(create_account));
+
+    // Cached routes (GET endpoints)
+    let cached_routes = Router::new()
+        .route("/questions/unsolved", get(list_unsolved))
+        .route("/questions/{id}", get(get_question))
+        .layer(axum::middleware::from_fn(redis_cache::cache_middleware));
+
+    // Uncached authenticated routes
+    let auth_routes = Router::new()
         .route("/change-api-key", post(change_api_key))
         .route("/questions", post(create_question))
-        .route("/questions/unsolved", get(list_unsolved))
-        .route("/questions/{id}", get(get_question).delete(delete_question))
+        .route("/questions/{id}", delete(delete_question))
         .route("/questions/{id}/answers", post(create_answer))
         .route("/questions/{id}/answers/{answer_id}", delete(delete_answer))
         .route("/questions/{id}/solved", post(mark_solved))
@@ -653,14 +671,12 @@ async fn main() -> anyhow::Result<()> {
             "/questions/{id}/star",
             post(star_question).delete(unstar_question),
         );
-    // .layer(axum::middleware::from_fn_with_state(
-    //     state.clone(),
-    //     middleware::cache_middleware,
-    // ));
-    // .with_state(pool);
 
-    let app = app_api
-        // .merge(app_api)
+    let app = Router::new()
+        .merge(public_routes)
+        .merge(cached_routes)
+        .merge(auth_routes)
+        .layer(Extension(cache_state))
         .layer(CompressionLayer::new())
         .layer(GovernorLayer::new(governor_conf))
         .layer(CorsLayer::permissive())

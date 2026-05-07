@@ -1,3 +1,5 @@
 # Q&A Server Configuration
 bind: "0.0.0.0:7879"
 database_url: "sqlite://qa.db"
+# Optional: Redis URL for caching (e.g., "redis://127.0.0.1:6379")
+# redis_url: "redis://127.0.0.1:6379"
