@@ -13,6 +13,9 @@ use rand::Rng;
 use rand::distributions::Alphanumeric;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use tower_governor::GovernorLayer;
+use tower_governor::governor::GovernorConfigBuilder;
+use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 
 // -- Config
 
@@ -265,8 +268,8 @@ async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Respon
 
     let questions = sqlx::query_as::<_, Question>(
         r#"
-        SELECT 
-            q.id, q.user_id, u.username, q.title, q.content, 
+        SELECT
+            q.id, q.user_id, u.username, q.title, q.content,
             q.created_at, q.solved, q.solved_at,
             EXISTS(SELECT 1 FROM stars s WHERE s.user_id = $1 AND s.question_id = q.id) as starred
         FROM questions q
@@ -422,8 +425,8 @@ async fn get_question(
 
     let question = sqlx::query_as::<_, Question>(
         r#"
-        SELECT 
-            q.id, q.user_id, u.username, q.title, q.content, 
+        SELECT
+            q.id, q.user_id, u.username, q.title, q.content,
             q.created_at, q.solved, q.solved_at, 0 as starred
         FROM questions q
         JOIN users u ON q.user_id = u.id
@@ -438,7 +441,7 @@ async fn get_question(
         Ok(Some(q)) => {
             let answers = sqlx::query_as::<_, Answer>(
                 r#"
-                SELECT 
+                SELECT
                     a.id, a.question_id, a.user_id, u.username, a.content, a.created_at
                 FROM answers a
                 JOIN users u ON a.user_id = u.id
@@ -559,6 +562,41 @@ async fn health() -> &'static str {
     "ok"
 }
 
+// -- Custom Key Extractor for Governor
+// This extractor uses API key for authenticated users, falls back to peer IP
+use std::sync::Arc;
+use tower_governor::GovernorError;
+use tower_governor::key_extractor::KeyExtractor;
+
+#[derive(Clone)]
+struct ApiKeyExtractor;
+
+impl KeyExtractor for ApiKeyExtractor {
+    type Key = Arc<str>;
+
+    fn extract<B>(&self, req: &axum::http::Request<B>) -> Result<Self::Key, GovernorError> {
+        // Try API key first
+        if let Some(api_key) = req
+            .headers()
+            .get("authorization")
+            .and_then(|h| h.to_str().ok())
+        {
+            return Ok(Arc::from(api_key));
+        }
+
+        // Fall back to peer IP if available
+        if let Some(connect_info) = req
+            .extensions()
+            .get::<axum::extract::ConnectInfo<SocketAddr>>()
+        {
+            return Ok(Arc::from(format!("ip:{}", connect_info.0.ip())));
+        }
+
+        // Last resort: anonymous
+        Ok(Arc::from("anonymous"))
+    }
+}
+
 // -- Main
 
 #[derive(Parser)]
@@ -592,7 +630,16 @@ async fn main() -> anyhow::Result<()> {
 
     println!("✓ database connected ({db_path})");
 
-    let app = Router::new()
+    // Configure rate limiting: 30 requests per second with burst of 60
+    // Rate limited by API key (or IP for unauthenticated requests)
+    let governor_conf = GovernorConfigBuilder::default()
+        .per_second(30)
+        .burst_size(60)
+        .key_extractor(ApiKeyExtractor)
+        .finish()
+        .unwrap();
+
+    let app_api = Router::new()
         .route("/health", get(health))
         .route("/register", post(create_account))
         .route("/change-api-key", post(change_api_key))
@@ -605,7 +652,18 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/questions/{id}/star",
             post(star_question).delete(unstar_question),
-        )
+        );
+    // .layer(axum::middleware::from_fn_with_state(
+    //     state.clone(),
+    //     middleware::cache_middleware,
+    // ));
+    // .with_state(pool);
+
+    let app = app_api
+        // .merge(app_api)
+        .layer(CompressionLayer::new())
+        .layer(GovernorLayer::new(governor_conf))
+        .layer(CorsLayer::permissive())
         .with_state(pool);
 
     println!("✓ qa-server listening on {bind}");
