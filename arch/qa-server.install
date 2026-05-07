@@ -1,0 +1,22 @@
+post_install() {
+    echo "==> qa-server systemd service installed."
+    echo "==> To configure the server:"
+    echo "    sudo mkdir -p /etc/qa-server"
+    echo "    sudo cp /usr/share/doc/qa-server/server.yml.example /etc/qa-server/server.yml"
+    echo "    sudo systemctl edit --full qa-server"
+    echo ""
+    echo "==> To start the system service:"
+    echo "    sudo systemctl enable --now qa-server"
+    echo ""
+    echo "==> Or use the user service:"
+    echo "    mkdir -p ~/.config/qa-server"
+    echo "    cp /usr/share/doc/qa-server/server.yml.example ~/.config/qa-server/server.yml"
+    echo "    systemctl --user enable --now qa-server"
+    echo ""
+    echo "==> To use the client:"
+    echo "    qa create-account"
+}
+
+post_upgrade() {
+    post_install "$@"
+}

@@ -1,0 +1,12 @@
+[Unit]
+Description=Q&A Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/qa-server %h/.config/qa-server/server.yml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

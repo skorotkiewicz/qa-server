@@ -1,0 +1,9 @@
+target/
+dev/
+data/
+test/*.db
+*.db
+*.db-*
+server.yml
+client.yml
+*.tar.gz

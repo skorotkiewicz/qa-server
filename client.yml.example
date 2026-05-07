@@ -1,0 +1,4 @@
+# Q&A Client Configuration
+endpoint: "http://localhost:7878"
+api_key: null
+username: null
