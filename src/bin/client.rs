@@ -203,7 +203,7 @@ enum Cmd {
         answer_id: i64,
     },
 
-    /// Generate shell completion
+    /// Generate shell completion (add `eval "$(qa complete zsh)"` to .zshrc)
     Complete { shell: clap_complete::Shell },
 }
 
