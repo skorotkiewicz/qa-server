@@ -28,11 +28,42 @@ struct ServerConfig {
     bind: Option<String>,
     database_url: String,
     redis_url: Option<String>,
+    /// Database connection pool size (default: 10)
+    db_pool_size: Option<u32>,
 }
 
-fn load_config(path: &str) -> anyhow::Result<ServerConfig> {
-    let text = fs::read_to_string(path)?;
-    Ok(serde_yaml::from_str(&text)?)
+impl ServerConfig {
+    /// Load config from file and override with environment variables
+    fn load(path: &str) -> anyhow::Result<Self> {
+        let text = fs::read_to_string(path)?;
+        let mut cfg: ServerConfig = serde_yaml::from_str(&text)?;
+
+        // Override with environment variables if set
+        if let Ok(ip) = std::env::var("QA_SERVER_IP") {
+            let port = std::env::var("QA_SERVER_PORT")
+                .ok()
+                .unwrap_or_else(|| "7879".to_string());
+            cfg.bind = Some(format!("{}:{}", ip, port));
+        } else if let Ok(port) = std::env::var("QA_SERVER_PORT") {
+            let ip = cfg
+                .bind
+                .as_ref()
+                .and_then(|b| b.split(':').next())
+                .unwrap_or("0.0.0.0")
+                .to_string();
+            cfg.bind = Some(format!("{}:{}", ip, port));
+        }
+
+        if let Ok(db_url) = std::env::var("DATABASE_URL") {
+            cfg.database_url = db_url;
+        }
+
+        if let Ok(redis_url) = std::env::var("REDIS_URL") {
+            cfg.redis_url = Some(redis_url);
+        }
+
+        Ok(cfg)
+    }
 }
 
 // -- Database
@@ -271,6 +302,30 @@ async fn create_question(
     }
 }
 
+/// Pagination parameters
+#[derive(Deserialize, Default)]
+struct Pagination {
+    #[serde(default)]
+    page: i64,
+    #[serde(default)]
+    limit: i64,
+}
+
+impl Pagination {
+    fn limit(&self, default: i64) -> i64 {
+        if self.limit > 0 && self.limit <= 100 {
+            self.limit
+        } else {
+            default
+        }
+    }
+
+    fn offset(&self, default_limit: i64) -> i64 {
+        let limit = self.limit(default_limit);
+        self.page.max(0) * limit
+    }
+}
+
 /// Question summary for list view (without content)
 #[derive(Serialize, FromRow)]
 struct QuestionSummary {
@@ -285,9 +340,16 @@ struct QuestionSummary {
     views: i64,
 }
 
-/// GET /questions/unsolved - List unsolved questions
-async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Response {
+/// GET /questions/unsolved - List unsolved questions (paginated)
+async fn list_unsolved(
+    State(pool): State<DbPool>,
+    headers: HeaderMap,
+    Query(pagination): Query<Pagination>,
+) -> Response {
     let _user = require_auth!(&pool, headers);
+
+    let limit = pagination.limit(20);
+    let offset = pagination.offset(20);
 
     let questions = sqlx::query_as::<_, QuestionSummary>(
         r#"
@@ -302,8 +364,11 @@ async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Respon
         JOIN users u ON q.user_id = u.id
         WHERE q.solved = FALSE
         ORDER BY q.created_at DESC
+        LIMIT $1 OFFSET $2
         "#,
     )
+    .bind(limit)
+    .bind(offset)
     .fetch_all(&pool)
     .await;
 
@@ -313,9 +378,16 @@ async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Respon
     }
 }
 
-/// GET /questions/starred - List questions starred by current user
-async fn list_starred(State(pool): State<DbPool>, headers: HeaderMap) -> Response {
+/// GET /questions/starred - List questions starred by current user (paginated)
+async fn list_starred(
+    State(pool): State<DbPool>,
+    headers: HeaderMap,
+    Query(pagination): Query<Pagination>,
+) -> Response {
     let user = require_auth!(&pool, headers);
+
+    let limit = pagination.limit(20);
+    let offset = pagination.offset(20);
 
     let questions = sqlx::query_as::<_, QuestionSummary>(
         r#"
@@ -331,9 +403,12 @@ async fn list_starred(State(pool): State<DbPool>, headers: HeaderMap) -> Respons
         JOIN stars st ON st.question_id = q.id
         WHERE st.user_id = $1
         ORDER BY q.created_at DESC
+        LIMIT $2 OFFSET $3
         "#,
     )
     .bind(user.id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(&pool)
     .await;
 
@@ -681,7 +756,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let cfg = load_config(&args.config)?;
+    let cfg = ServerConfig::load(&args.config)?;
 
     let bind: SocketAddr = cfg.bind.as_deref().unwrap_or("0.0.0.0:7879").parse()?;
 
@@ -696,7 +771,39 @@ async fn main() -> anyhow::Result<()> {
         std::fs::File::create(db_path)?;
     }
 
-    let pool = sqlx::SqlitePool::connect(&cfg.database_url).await?;
+    // Configure connection pool for high performance
+    let pool_size = cfg.db_pool_size.unwrap_or(10);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(pool_size)
+        .min_connections(2)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .max_lifetime(std::time::Duration::from_secs(3600))
+        .idle_timeout(std::time::Duration::from_secs(600))
+        .connect(&cfg.database_url)
+        .await?;
+
+    // Optimize SQLite for performance
+    sqlx::query("PRAGMA journal_mode=WAL")
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::query("PRAGMA synchronous=NORMAL")
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::query("PRAGMA cache_size=-64000")
+        .execute(&pool)
+        .await
+        .ok(); // 64MB cache
+    sqlx::query("PRAGMA temp_store=memory")
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::query("PRAGMA mmap_size=30000000000")
+        .execute(&pool)
+        .await
+        .ok(); // 30GB mmap
+
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     println!("✓ database connected ({db_path})");

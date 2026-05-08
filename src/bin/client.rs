@@ -153,11 +153,25 @@ enum Cmd {
     /// Ask a question (reads from stdin, expects title on first line, then content)
     Ask,
 
-    /// List unsolved questions
-    Unsolved,
+    /// List unsolved questions (paginated)
+    Unsolved {
+        /// Page number (0-indexed)
+        #[arg(short, long, default_value = "0")]
+        page: i64,
+        /// Page size (1-100)
+        #[arg(short, long, default_value = "20")]
+        limit: i64,
+    },
 
-    /// List questions you have starred
-    Starred,
+    /// List questions you have starred (paginated)
+    Starred {
+        /// Page number (0-indexed)
+        #[arg(short, long, default_value = "0")]
+        page: i64,
+        /// Page size (1-100)
+        #[arg(short, long, default_value = "20")]
+        limit: i64,
+    },
 
     /// Get a question with all its answers
     Get {
@@ -172,7 +186,7 @@ enum Cmd {
     },
 
     /// Mark a question as solved or unsolved (only the asker can do this)
-    Solved {
+    Solve {
         /// Question ID
         id: i64,
         /// Mark as unsolved instead of solved
@@ -345,7 +359,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Unsolved => {
+        Cmd::Unsolved { page, limit } => {
             let cfg = load_config()?;
             let api_key = cfg
                 .api_key
@@ -354,7 +368,10 @@ fn main() -> anyhow::Result<()> {
             let endpoint = &cfg.endpoint;
 
             let client = client_with_api_key(api_key);
-            let url = format!("{}/questions/unsolved", endpoint);
+            let url = format!(
+                "{}/questions/unsolved?page={}&limit={}",
+                endpoint, page, limit
+            );
 
             let resp = client.get(&url).send()?;
 
@@ -378,7 +395,8 @@ fn main() -> anyhow::Result<()> {
                     }
                     println!(
                         "  => show: `qa get <id>` | answer: `echo \"your answer\" | qa answer <id>`"
-                    )
+                    );
+                    println!("  => next page: `qa unsolved --page {}`", page + 1);
                 }
             } else {
                 let err_text = resp.text()?;
@@ -386,7 +404,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Starred => {
+        Cmd::Starred { page, limit } => {
             let cfg = load_config()?;
             let api_key = cfg
                 .api_key
@@ -395,7 +413,10 @@ fn main() -> anyhow::Result<()> {
             let endpoint = &cfg.endpoint;
 
             let client = client_with_api_key(api_key);
-            let url = format!("{}/questions/starred", endpoint);
+            let url = format!(
+                "{}/questions/starred?page={}&limit={}",
+                endpoint, page, limit
+            );
 
             let resp = client.get(&url).send()?;
 
@@ -419,7 +440,8 @@ fn main() -> anyhow::Result<()> {
                     }
                     println!(
                         "  => show: `qa get <id>` | answer: `echo \"your answer\" | qa answer <id>`"
-                    )
+                    );
+                    println!("  => next page: `qa starred --page {}`", page + 1);
                 }
             } else {
                 let err_text = resp.text()?;
@@ -507,7 +529,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Solved { id, unsolved } => {
+        Cmd::Solve { id, unsolved } => {
             let cfg = load_config()?;
             let api_key = cfg
                 .api_key
