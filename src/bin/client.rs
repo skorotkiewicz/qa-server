@@ -171,10 +171,13 @@ enum Cmd {
         id: i64,
     },
 
-    /// Mark a question as solved (only the asker can do this)
+    /// Mark a question as solved or unsolved (only the asker can do this)
     Solved {
         /// Question ID
         id: i64,
+        /// Mark as unsolved instead of solved
+        #[arg(long = "false")]
+        unsolved: bool,
     },
 
     /// Star a question
@@ -504,7 +507,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Solved { id } => {
+        Cmd::Solved { id, unsolved } => {
             let cfg = load_config()?;
             let api_key = cfg
                 .api_key
@@ -513,14 +516,20 @@ fn main() -> anyhow::Result<()> {
             let endpoint = &cfg.endpoint;
 
             let client = client_with_api_key(api_key);
-            let url = format!("{}/questions/{}/solved", endpoint, id);
+            let url = format!("{}/questions/{}/solved?unsolved={}", endpoint, id, unsolved);
 
             let resp = client.post(&url).send()?;
 
             if resp.status().is_success() {
-                println!("✓ Question #{} marked as solved", id);
+                if unsolved {
+                    println!("✓ Question #{} marked as unsolved", id);
+                } else {
+                    println!("✓ Question #{} marked as solved", id);
+                }
             } else if resp.status() == reqwest::StatusCode::FORBIDDEN {
-                anyhow::bail!("Only the person who asked the question can mark it as solved");
+                anyhow::bail!(
+                    "Only the person who asked the question can mark it as solved/unsolved"
+                );
             } else {
                 let err_text = resp.text()?;
                 anyhow::bail!("Server error: {}", err_text);

@@ -2,7 +2,7 @@ use std::{fs, net::SocketAddr, sync::Arc};
 
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, Extension, Path, State},
+    extract::{ConnectInfo, Extension, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -381,11 +381,12 @@ async fn create_answer(
     }
 }
 
-/// POST /questions/:id/solved - Mark question as solved (only asker)
+/// POST /questions/:id/solved - Mark question as solved/unsolved (only asker)
 async fn mark_solved(
     State(pool): State<DbPool>,
     headers: HeaderMap,
     Path(question_id): Path<i64>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
     let user = require_auth!(&pool, headers);
 
@@ -400,7 +401,10 @@ async fn mark_solved(
     match question {
         Some((owner_id,)) => {
             if owner_id != user.id {
-                return (StatusCode::FORBIDDEN, "only the asker can mark as solved")
+                return (
+                    StatusCode::FORBIDDEN,
+                    "only the asker can mark as solved/unsolved",
+                )
                     .into_response();
             }
         }
@@ -409,12 +413,22 @@ async fn mark_solved(
         }
     }
 
-    let result = sqlx::query(
-        "UPDATE questions SET solved = TRUE, solved_at = CURRENT_TIMESTAMP WHERE id = $1",
-    )
-    .bind(question_id)
-    .execute(&pool)
-    .await;
+    // Check if unsolved flag is set
+    let unsolved = params.get("unsolved").map(|v| v == "true").unwrap_or(false);
+
+    let result = if unsolved {
+        sqlx::query("UPDATE questions SET solved = FALSE, solved_at = NULL WHERE id = $1")
+            .bind(question_id)
+            .execute(&pool)
+            .await
+    } else {
+        sqlx::query(
+            "UPDATE questions SET solved = TRUE, solved_at = CURRENT_TIMESTAMP WHERE id = $1",
+        )
+        .bind(question_id)
+        .execute(&pool)
+        .await
+    };
 
     match result {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
