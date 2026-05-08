@@ -1,0 +1,32 @@
+services:
+  valkey:
+    image: valkey/valkey:9.0.3
+    container_name: qa-server-valkey
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    restart: unless-stopped
+
+  qa-server:
+    build: .
+    container_name: qa-server
+    image: qa-server
+    ports:
+      - "3000:7879"
+    volumes:
+      # - ./data:/data
+      - qa_server_data:/data
+    environment:
+      - DATABASE_URL=sqlite:/data/qa-server.db
+      - REDIS_URL=redis://qa-server-valkey:6379
+      - QA_SERVER_IP=0.0.0.0
+      - QA_SERVER_PORT=7879
+      - RUST_LOG=info
+    depends_on:
+      - valkey
+  #   restart: unless-stopped
+
+volumes:
+  qa_server_data:
+  valkey_data:

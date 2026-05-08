@@ -4,6 +4,25 @@ A high-performance Q&A system with CLI client and HTTP API server.
 
 ## Quick Start
 
+**Docker**:
+```bash
+# Run pre-built image
+docker pull skorotkiewicz/qa-server:latest # pull latest image
+docker run -d -p 3000:7879 -v qa_server_data:/data skorotkiewicz/qa-server:latest
+
+# Or build locally
+docker build -t qa_server .
+docker run -d -p 3000:7879 -v qa_server_data:/data qa-server
+
+# Or use docker-compose
+docker-compose up -d
+```
+
+**From source**:
+```bash
+cargo install --path .
+```
+
 ### 1. Start the Server
 
 ```bash

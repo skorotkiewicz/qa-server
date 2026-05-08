@@ -2,6 +2,15 @@
 name    = "qa-rs"
 version = "0.1.0"
 edition = "2024"
+description = "High-performance Q&A system with HTTP API and CLI"
+authors = ["Sebastian Korotkiewicz <skorotkiewicz@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/skorotkiewicz/qa-server"
+homepage = "https://github.com/skorotkiewicz/qa-server"
+documentation = "https://github.com/skorotkiewicz/qa-server#readme"
+keywords = ["qa", "questions", "answers", "api", "cli", "rust"]
+categories = ["command-line-utilities", "web-programming::http-server"]
+readme = "README.md"
 
 [[bin]]
 name = "qa-server"
