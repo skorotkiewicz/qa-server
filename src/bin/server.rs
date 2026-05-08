@@ -278,6 +278,7 @@ struct QuestionSummary {
     title: String,
     #[sqlx(rename = "username")]
     author: String,
+    created_at: DateTime<Utc>,
     #[sqlx(default)]
     stars: i64,
     #[sqlx(default)]
@@ -294,6 +295,7 @@ async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Respon
             q.id,
             q.title,
             u.username,
+            q.created_at,
             (SELECT COUNT(*) FROM stars s WHERE s.question_id = q.id) as stars,
             q.views
         FROM questions q

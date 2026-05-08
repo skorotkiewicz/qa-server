@@ -128,6 +128,7 @@ struct QuestionSummary {
     title: String,
     #[allow(dead_code)]
     author: String,
+    created_at: String,
     stars: i64,
     views: i64,
 }
@@ -363,9 +364,10 @@ fn main() -> anyhow::Result<()> {
                         } else {
                             String::new()
                         };
+                        let time_ago = format_time_ago(&q.created_at);
                         println!(
-                            "Question #{}: {} by {} [views:{}{}]",
-                            q.id, q.title, q.author, q.views, stars
+                            "[question: {}] {} at {} by {} [views:{}{}]",
+                            q.id, q.title, time_ago, q.author, q.views, stars
                         );
                     }
                     println!(
@@ -401,19 +403,20 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     String::new()
                 };
+                let time_ago = format_time_ago(&q.created_at);
 
                 println!(
-                    "{} Question #{}: {} by {} [views:{}{}]",
-                    status, q.id, q.title, q.author, q.views, stars
+                    "{} [question: {}] {} at {} by {} [views:{}{}]",
+                    status, q.id, q.title, time_ago, q.author, q.views, stars
                 );
                 println!("\n{}", q.content);
                 println!("\n--- {} Answers ---\n", qa.answers.len());
 
                 for ans in qa.answers {
                     let time_ago = format_time_ago(&ans.created_at);
-                    println!("#{} at {} by {}", ans.id, time_ago, ans.author);
+                    println!("[answer: {}] at {} by {}", ans.id, time_ago, ans.author);
                     println!("{}", ans.content);
-                    println!("---------------------------------");
+                    println!("--------");
                 }
             } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
                 anyhow::bail!("Question #{} not found", id);
