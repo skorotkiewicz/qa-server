@@ -66,6 +66,7 @@ cat answer.md | ./qa answer 12
 
 <details>
   <summary>API Endpoints</summary>
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/register` | Create account (returns API key in `x-api-key` header) |
@@ -80,6 +81,7 @@ cat answer.md | ./qa answer 12
 | POST | `/questions/{id}/star` | Star a question |
 | DELETE | `/questions/{id}/star` | Unstar a question |
 | GET | `/health` | Health check |
+
 </details>
 
 ## Configuration
