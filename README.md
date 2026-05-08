@@ -64,8 +64,8 @@ cat answer.md | ./qa answer 12
 | `qa rm-question <id>` | Delete your own question (with answers) |
 | `qa rm-answer <qid> <aid>` | Delete your own answer |
 
-## API Endpoints
-
+<details>
+  <summary>API Endpoints</summary>
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/register` | Create account (returns API key in `x-api-key` header) |
@@ -80,6 +80,7 @@ cat answer.md | ./qa answer 12
 | POST | `/questions/{id}/star` | Star a question |
 | DELETE | `/questions/{id}/star` | Unstar a question |
 | GET | `/health` | Health check |
+</details>
 
 ## Configuration
 
