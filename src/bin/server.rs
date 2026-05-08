@@ -313,6 +313,36 @@ async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Respon
     }
 }
 
+/// GET /questions/starred - List questions starred by current user
+async fn list_starred(State(pool): State<DbPool>, headers: HeaderMap) -> Response {
+    let user = require_auth!(&pool, headers);
+
+    let questions = sqlx::query_as::<_, QuestionSummary>(
+        r#"
+        SELECT
+            q.id,
+            q.title,
+            u.username,
+            q.created_at,
+            (SELECT COUNT(*) FROM stars s WHERE s.question_id = q.id) as stars,
+            q.views
+        FROM questions q
+        JOIN users u ON q.user_id = u.id
+        JOIN stars st ON st.question_id = q.id
+        WHERE st.user_id = $1
+        ORDER BY q.created_at DESC
+        "#,
+    )
+    .bind(user.id)
+    .fetch_all(&pool)
+    .await;
+
+    match questions {
+        Ok(rows) => Json(rows).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// POST /questions/:id/answers - Answer a question
 async fn create_answer(
     State(pool): State<DbPool>,
@@ -684,6 +714,7 @@ async fn main() -> anyhow::Result<()> {
     // Cached routes (GET endpoints)
     let cached_routes = Router::new()
         .route("/questions/unsolved", get(list_unsolved))
+        .route("/questions/starred", get(list_starred))
         .route("/questions/{id}", get(get_question))
         .layer(axum::middleware::from_fn(redis_cache::cache_middleware));
 

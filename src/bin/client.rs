@@ -156,6 +156,9 @@ enum Cmd {
     /// List unsolved questions
     Unsolved,
 
+    /// List questions you have starred
+    Starred,
+
     /// Get a question with all its answers
     Get {
         /// Question ID
@@ -367,6 +370,47 @@ fn main() -> anyhow::Result<()> {
                         let time_ago = format_time_ago(&q.created_at);
                         println!(
                             "[question: {}] {} at {} by {} [views:{}{}]",
+                            q.id, q.title, time_ago, q.author, q.views, stars
+                        );
+                    }
+                    println!(
+                        "  => show: `qa get <id>` | answer: `echo \"your answer\" | qa answer <id>`"
+                    )
+                }
+            } else {
+                let err_text = resp.text()?;
+                anyhow::bail!("Server error: {}", err_text);
+            }
+        }
+
+        Cmd::Starred => {
+            let cfg = load_config()?;
+            let api_key = cfg
+                .api_key
+                .as_ref()
+                .context("No API key found. Run `qa create-account` first.")?;
+            let endpoint = &cfg.endpoint;
+
+            let client = client_with_api_key(api_key);
+            let url = format!("{}/questions/starred", endpoint);
+
+            let resp = client.get(&url).send()?;
+
+            if resp.status().is_success() {
+                let questions: Vec<QuestionSummary> = resp.json()?;
+
+                if questions.is_empty() {
+                    println!("No starred questions.");
+                } else {
+                    for q in questions {
+                        let stars = if q.stars > 0 {
+                            format!(", stars:{}", q.stars)
+                        } else {
+                            String::new()
+                        };
+                        let time_ago = format_time_ago(&q.created_at);
+                        println!(
+                            "Question #{}: {} at {} by {} [views:{}{}]",
                             q.id, q.title, time_ago, q.author, q.views, stars
                         );
                     }
