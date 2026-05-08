@@ -330,7 +330,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             let title = lines[0].trim().to_string();
-            let content = lines[1..].join("\n").trim().to_string();
+            let content = input.trim().to_string();
 
             if title.is_empty() {
                 anyhow::bail!("Title cannot be empty");
