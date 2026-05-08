@@ -40,10 +40,10 @@ remove-hook:
 
 add-tag:
     #!/usr/bin/env bash
-    git push
+    # git push
     VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
     git tag "v${VERSION}"
-    git commit -m "v${VERSION}"
+    # git commit -m "v${VERSION}"
     git push origin "v${VERSION}"
     echo "Created and pushed tag v${VERSION}"
 

@@ -45,7 +45,7 @@ jobs:
           cp ../README.md README.md
           cp ../LICENSE LICENSE
           cp ../server.yml.example server.yml.example
-          cp ../client.yml.example client.yml.example
+          cp ../config.yml.example config.yml.example
           cp -r ../systemd systemd
           cp ../arch/qa-server.install qa-server.install
           tar czf ../qa-server-${{ github.ref_name }}-${{ matrix.target }}.tar.gz *
@@ -59,7 +59,7 @@ jobs:
           copy README.md dist\README.md
           copy LICENSE dist\LICENSE
           copy server.yml.example dist\server.yml.example
-          copy client.yml.example dist\client.yml.example
+          copy config.yml.example dist\config.yml.example
           cd dist && 7z a ..\qa-server-${{ github.ref_name }}-${{ matrix.target }}.zip *
 
       - uses: actions/upload-artifact@v4
