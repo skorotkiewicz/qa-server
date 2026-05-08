@@ -1,0 +1,4 @@
+# QA Client Configuration
+endpoint: "http://localhost:7879"
+api_key: null
+username: null

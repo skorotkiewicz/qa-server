@@ -64,6 +64,8 @@ struct Question {
     solved_at: Option<DateTime<Utc>>,
     #[sqlx(default)]
     starred: bool,
+    #[sqlx(default)]
+    views: i64,
 }
 
 #[derive(Serialize, FromRow)]
@@ -267,23 +269,33 @@ async fn create_question(
     }
 }
 
+/// Question summary for list view (without content)
+#[derive(Serialize, FromRow)]
+struct QuestionSummary {
+    id: i64,
+    title: String,
+    #[sqlx(default)]
+    stars: i64,
+    #[sqlx(default)]
+    views: i64,
+}
+
 /// GET /questions/unsolved - List unsolved questions
 async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Response {
-    let user = require_auth!(&pool, headers);
+    let _user = require_auth!(&pool, headers);
 
-    let questions = sqlx::query_as::<_, Question>(
+    let questions = sqlx::query_as::<_, QuestionSummary>(
         r#"
         SELECT
-            q.id, q.user_id, u.username, q.title, q.content,
-            q.created_at, q.solved, q.solved_at,
-            EXISTS(SELECT 1 FROM stars s WHERE s.user_id = $1 AND s.question_id = q.id) as starred
+            q.id,
+            q.title,
+            (SELECT COUNT(*) FROM stars s WHERE s.question_id = q.id) as stars,
+            q.views
         FROM questions q
-        JOIN users u ON q.user_id = u.id
         WHERE q.solved = FALSE
         ORDER BY q.created_at DESC
         "#,
     )
-    .bind(user.id)
     .fetch_all(&pool)
     .await;
 
@@ -420,7 +432,7 @@ async fn unstar_question(
     }
 }
 
-/// GET /questions/:id - Get question with answers
+/// GET /questions/:id - Get question with answers (increments view count)
 async fn get_question(
     State(pool): State<DbPool>,
     headers: HeaderMap,
@@ -428,11 +440,18 @@ async fn get_question(
 ) -> Response {
     let _user = require_auth!(&pool, headers);
 
+    // Increment view count
+    sqlx::query("UPDATE questions SET views = views + 1 WHERE id = $1")
+        .bind(question_id)
+        .execute(&pool)
+        .await
+        .ok();
+
     let question = sqlx::query_as::<_, Question>(
         r#"
         SELECT
             q.id, q.user_id, u.username, q.title, q.content,
-            q.created_at, q.solved, q.solved_at, 0 as starred
+            q.created_at, q.solved, q.solved_at, 0 as starred, q.views
         FROM questions q
         JOIN users u ON q.user_id = u.id
         WHERE q.id = $1
@@ -611,7 +630,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let cfg = load_config(&args.config)?;
 
-    let bind: SocketAddr = cfg.bind.as_deref().unwrap_or("0.0.0.0:7878").parse()?;
+    let bind: SocketAddr = cfg.bind.as_deref().unwrap_or("0.0.0.0:7879").parse()?;
 
     // Ensure database file exists for SQLite
     let db_path = cfg
@@ -625,7 +644,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let pool = sqlx::SqlitePool::connect(&cfg.database_url).await?;
-    sqlx::migrate!("./migrations/sqlite").run(&pool).await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
 
     println!("✓ database connected ({db_path})");
 

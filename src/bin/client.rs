@@ -116,6 +116,15 @@ struct QuestionWithAnswers {
     answers: Vec<Answer>,
 }
 
+/// Question summary for list view (no content)
+#[derive(Deserialize)]
+struct QuestionSummary {
+    id: i64,
+    title: String,
+    stars: i64,
+    views: i64,
+}
+
 // -- CLI
 
 #[derive(Parser)]
@@ -336,23 +345,22 @@ fn main() -> anyhow::Result<()> {
             let resp = client.get(&url).send()?;
 
             if resp.status().is_success() {
-                let questions: Vec<Question> = resp.json()?;
+                let questions: Vec<QuestionSummary> = resp.json()?;
 
                 if questions.is_empty() {
                     println!("No unsolved questions.");
                 } else {
                     for q in questions {
-                        let star_marker = if q.starred { " ★" } else { "" };
-                        println!("  #{} {} by {}{}", q.id, q.title, q.author, star_marker);
-                        // Print first 100 chars of content
-                        let preview: String = q.content.chars().take(100).collect();
-                        if q.content.len() > 100 {
-                            println!("    {}...", preview);
+                        let stars = if q.stars > 0 {
+                            format!("stars:{}, ", q.stars)
                         } else {
-                            println!("    {}", preview);
-                        }
-                        println!();
+                            String::new()
+                        };
+                        println!("#{} {} [{}views:{}]", q.id, q.title, stars, q.views);
                     }
+                    println!(
+                        "  => show: `qa get <id>` | answer: `echo \"your answer\" | qa answer <id>`"
+                    )
                 }
             } else {
                 let err_text = resp.text()?;

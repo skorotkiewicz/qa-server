@@ -5,5 +5,5 @@ test/*.db
 *.db
 *.db-*
 server.yml
-client.yml
+config.yml
 *.tar.gz
