@@ -299,7 +299,7 @@ fn cmd_get(id: i64) -> anyhow::Result<()> {
     let app = App::load()?;
     let resp = app
         .client()?
-        .get(&app.url(&format!("/questions/{}", id)))
+        .get(app.url(&format!("/questions/{}", id)))
         .send()?;
 
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
