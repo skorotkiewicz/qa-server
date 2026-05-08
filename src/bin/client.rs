@@ -95,14 +95,19 @@ struct Question {
     solved: bool,
     #[allow(dead_code)]
     solved_at: Option<String>,
+    #[allow(dead_code)]
     starred: bool,
+    #[allow(dead_code)]
+    views: i64,
+    stars: i64,
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct Answer {
     id: i64,
+    #[allow(dead_code)]
     question_id: i64,
+    #[allow(dead_code)]
     user_id: i64,
     author: String,
     content: String,
@@ -121,6 +126,8 @@ struct QuestionWithAnswers {
 struct QuestionSummary {
     id: i64,
     title: String,
+    #[allow(dead_code)]
+    author: String,
     stars: i64,
     views: i64,
 }
@@ -352,11 +359,14 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     for q in questions {
                         let stars = if q.stars > 0 {
-                            format!("stars:{}, ", q.stars)
+                            format!(", stars:{}", q.stars)
                         } else {
                             String::new()
                         };
-                        println!("#{} {} [{}views:{}]", q.id, q.title, stars, q.views);
+                        println!(
+                            "Question #{}: {} by {} [views:{}{}]",
+                            q.id, q.title, q.author, q.views, stars
+                        );
                     }
                     println!(
                         "  => show: `qa get <id>` | answer: `echo \"your answer\" | qa answer <id>`"
@@ -386,18 +396,24 @@ fn main() -> anyhow::Result<()> {
                 let q = qa.question;
 
                 let status = if q.solved { "[SOLVED]" } else { "[OPEN]" };
-                let star_marker = if q.starred { " ★" } else { "" };
+                let stars = if q.stars > 0 {
+                    format!(", stars:{}", q.stars)
+                } else {
+                    String::new()
+                };
 
                 println!(
-                    "{} Question #{}: {} by {}{}",
-                    status, q.id, q.title, q.author, star_marker
+                    "{} Question #{}: {} by {} [views:{}{}]",
+                    status, q.id, q.title, q.author, q.views, stars
                 );
                 println!("\n{}", q.content);
-                println!("\n--- {} Answers ---", qa.answers.len());
+                println!("\n--- {} Answers ---\n", qa.answers.len());
 
                 for ans in qa.answers {
-                    println!("\nAnswer #{} by {}", ans.id, ans.author);
+                    let time_ago = format_time_ago(&ans.created_at);
+                    println!("#{} at {} by {}", ans.id, time_ago, ans.author);
                     println!("{}", ans.content);
+                    println!("---------------------------------");
                 }
             } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
                 anyhow::bail!("Question #{} not found", id);
@@ -576,6 +592,43 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn format_time_ago(date_str: &str) -> String {
+    if date_str.is_empty() {
+        return "unknown".to_string();
+    }
+
+    let Ok(created) = chrono::DateTime::parse_from_rfc3339(date_str) else {
+        return "unknown".to_string();
+    };
+
+    let now = chrono::Utc::now();
+    let duration = now.signed_duration_since(created.with_timezone(&chrono::Utc));
+
+    let seconds = duration.num_seconds();
+    let minutes = duration.num_minutes();
+    let hours = duration.num_hours();
+    let days = duration.num_days();
+    let weeks = days / 7;
+    let months = days / 30;
+    let years = days / 365;
+
+    if seconds < 60 {
+        "just now".to_string()
+    } else if minutes < 60 {
+        format!("{}m ago", minutes)
+    } else if hours < 24 {
+        format!("{}h ago", hours)
+    } else if days < 7 {
+        format!("{}d ago", days)
+    } else if weeks < 4 {
+        format!("{}w ago", weeks)
+    } else if months < 12 {
+        format!("{}mo ago", months)
+    } else {
+        format!("{}y ago", years)
+    }
 }
 
 fn prompt(message: &str) -> anyhow::Result<String> {

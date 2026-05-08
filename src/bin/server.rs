@@ -66,6 +66,8 @@ struct Question {
     starred: bool,
     #[sqlx(default)]
     views: i64,
+    #[sqlx(default)]
+    stars: i64,
 }
 
 #[derive(Serialize, FromRow)]
@@ -274,6 +276,8 @@ async fn create_question(
 struct QuestionSummary {
     id: i64,
     title: String,
+    #[sqlx(rename = "username")]
+    author: String,
     #[sqlx(default)]
     stars: i64,
     #[sqlx(default)]
@@ -289,9 +293,11 @@ async fn list_unsolved(State(pool): State<DbPool>, headers: HeaderMap) -> Respon
         SELECT
             q.id,
             q.title,
+            u.username,
             (SELECT COUNT(*) FROM stars s WHERE s.question_id = q.id) as stars,
             q.views
         FROM questions q
+        JOIN users u ON q.user_id = u.id
         WHERE q.solved = FALSE
         ORDER BY q.created_at DESC
         "#,
@@ -451,7 +457,8 @@ async fn get_question(
         r#"
         SELECT
             q.id, q.user_id, u.username, q.title, q.content,
-            q.created_at, q.solved, q.solved_at, 0 as starred, q.views
+            q.created_at, q.solved, q.solved_at, 0 as starred, q.views,
+            (SELECT COUNT(*) FROM stars s WHERE s.question_id = q.id) as stars
         FROM questions q
         JOIN users u ON q.user_id = u.id
         WHERE q.id = $1
